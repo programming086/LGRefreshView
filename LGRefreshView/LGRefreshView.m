@@ -28,18 +28,21 @@
 //
 
 #import "LGRefreshView.h"
+#import "DACircularProgressView.h"
 
-#define kLGRefreshViewMainScreenSideMax     MAX(UIScreen.mainScreen.bounds.size.width, UIScreen.mainScreen.bounds.size.height)
-#define kLGRefreshViewDeviceIsOld           (NSProcessInfo.processInfo.activeProcessorCount < 2)
-#define kLGRefreshViewDegreesToRadians(d)   ((d) * M_PI / 180)
+#define kLGRefreshViewMainScreenSideMax         MAX(UIScreen.mainScreen.bounds.size.width, UIScreen.mainScreen.bounds.size.height)
+#define kLGRefreshViewDeviceIsOld               (NSProcessInfo.processInfo.activeProcessorCount < 2)
+#define kLGRefreshViewDegreesToRadians(d)       ((d) * M_PI / 180)
+#define kLGRefreshViewCircleOutMaxProgress      (_loadingView ? 1.f : 0.93)
+#define kLGRefreshViewCircleInMaxProgress       (_loadingView ? 1.f : 0.9)
+#define kLGRefreshViewHeight                    64.f
+#define kLGRefreshViewCircleOutSize             (kLGRefreshViewHeight * 0.5)
+#define kLGRefreshViewCircleInSize              (kLGRefreshViewHeight * 0.3)
+#define kLGRefreshViewCircleOutThicknessRatio   0.2
+#define kLGRefreshViewCircleInThicknessRatio    0.25
 
-static CGFloat const kRefreshViewHeight       = 64.f;
-static CGFloat const kCircleOutSize           = kRefreshViewHeight * 0.5;
-static CGFloat const kCircleInSize            = kRefreshViewHeight * 0.3;
-static CGFloat const kCircleOutMaxProgress    = 0.93;
-static CGFloat const kCircleInMaxProgress     = 0.9;
-static CGFloat const kCircleOutThicknessRatio = 0.2;
-static CGFloat const kCircleInThicknessRatio  = 0.25;
+static UIView *kLGRefreshViewLoadingView;
+static UIColor *kLGRefreshViewTintColor;
 
 @interface LGRefreshView ()
 
@@ -60,9 +63,6 @@ static CGFloat const kCircleInThicknessRatio  = 0.25;
 @property (assign, nonatomic) CGFloat   timeOffset;
 @property (strong, nonatomic) NSDate    *beginUpdatingDate;
 
-- (void)addObservers;
-- (void)removeObservers;
-
 @end
 
 @implementation LGRefreshView
@@ -73,14 +73,14 @@ static CGFloat const kCircleInThicknessRatio  = 0.25;
     if (self)
     {
         _enabled = YES;
-        _tintColor = [UIColor colorWithRed:0.f green:0.5 blue:1.0 alpha:1.f];
-        
+        _tintColor = (kLGRefreshViewTintColor ? kLGRefreshViewTintColor : [UIColor colorWithRed:0.f green:0.5 blue:1.0 alpha:1.f]);
+
         _scrollView = scrollView;
-        
+
         _originalContentInset = _scrollView.contentInset;
-        
+
         [super setBackgroundColor:[UIColor clearColor]];
-        
+
         _circleViewOut = [DACircularProgressView new];
         _circleViewOut.backgroundColor = [UIColor clearColor];
         _circleViewOut.trackTintColor = [UIColor clearColor];
@@ -89,9 +89,9 @@ static CGFloat const kCircleInThicknessRatio  = 0.25;
         [_circleViewOut setProgress:0.f animated:NO];
         _circleViewOut.alpha = 0.f;
         _circleViewOut.layer.anchorPoint = CGPointMake(0.5, 0.5);
-        _circleViewOut.thicknessRatio = kCircleOutThicknessRatio;
+        _circleViewOut.thicknessRatio = kLGRefreshViewCircleOutThicknessRatio;
         [self addSubview:_circleViewOut];
-        
+
         _circleViewIn = [DACircularProgressView new];
         _circleViewIn.backgroundColor = [UIColor clearColor];
         _circleViewIn.trackTintColor = [UIColor clearColor];
@@ -101,11 +101,19 @@ static CGFloat const kCircleInThicknessRatio  = 0.25;
         _circleViewIn.alpha = 0.f;
         _circleViewIn.layer.anchorPoint = CGPointMake(0.5, 0.5);
         _circleViewIn.transform = CGAffineTransformScale(_circleViewIn.transform, -1, 1);
-        _circleViewIn.thicknessRatio = kCircleInThicknessRatio;
+        _circleViewIn.thicknessRatio = kLGRefreshViewCircleInThicknessRatio;
         [self addSubview:_circleViewIn];
-        
+
+        if (kLGRefreshViewLoadingView)
+        {
+            _loadingView = kLGRefreshViewLoadingView;
+            _loadingView.alpha = 0.f;
+            [_loadingView removeFromSuperview];
+            [self addSubview:_loadingView];
+        }
+
         [_scrollView insertSubview:self atIndex:0];
-        
+
         [self layoutInvalidate];
     }
     return self;
@@ -159,8 +167,8 @@ static CGFloat const kCircleInThicknessRatio  = 0.25;
 #if DEBUG
     NSLog(@"%s [Line %d]", __PRETTY_FUNCTION__, __LINE__);
 #endif
-    
-    self.delegate = nil;
+
+    _delegate = nil;
 }
 
 #pragma mark -
@@ -168,7 +176,7 @@ static CGFloat const kCircleInThicknessRatio  = 0.25;
 - (void)willMoveToSuperview:(UIView *)newSuperview
 {
     [super willMoveToSuperview:newSuperview];
-    
+
     if (!newSuperview)
         [self removeObservers];
     else
@@ -180,7 +188,7 @@ static CGFloat const kCircleInThicknessRatio  = 0.25;
 - (void)setTintColor:(UIColor *)tintColor
 {
     _tintColor = tintColor;
-    
+
     if (_circleViewOut) _circleViewOut.progressTintColor = _tintColor;
     if (_circleViewIn) _circleViewIn.progressTintColor = _tintColor;
 }
@@ -192,7 +200,7 @@ static CGFloat const kCircleInThicknessRatio  = 0.25;
         if (_backgroundView)
         {
             [_backgroundView removeFromSuperview];
-            self.backgroundView = nil;
+            _backgroundView = nil;
         }
     }
     else
@@ -204,7 +212,7 @@ static CGFloat const kCircleInThicknessRatio  = 0.25;
             _backgroundView.frame = CGRectMake(0.f, self.frame.size.height-kLGRefreshViewMainScreenSideMax, self.frame.size.width, kLGRefreshViewMainScreenSideMax);
             [self insertSubview:_backgroundView atIndex:0];
         }
-        
+
         _backgroundView.backgroundColor = backgroundColor;
     }
 }
@@ -214,12 +222,50 @@ static CGFloat const kCircleInThicknessRatio  = 0.25;
     if (enabled != _enabled)
     {
         _enabled = enabled;
-        
+
         self.hidden = !_enabled;
-        
+
         if (_enabled) [self addObservers];
         else [self removeObservers];
     }
+}
+
+- (void)setOffsetY:(CGFloat)offsetY
+{
+    if (offsetY != _offsetY)
+    {
+        _offsetY = offsetY;
+
+        [self layoutInvalidate];
+    }
+}
+
+- (void)setLoadingView:(UIView *)loadingView
+{
+    if (_loadingView)
+        [_loadingView removeFromSuperview];
+
+    _loadingView = loadingView;
+
+    if (_loadingView)
+    {
+        _loadingView.alpha = 0.f;
+        [_loadingView removeFromSuperview];
+        [self addSubview:_loadingView];
+    }
+}
+
++ (void)setLoadingView:(UIView *)view
+{
+    kLGRefreshViewLoadingView = view;
+
+    if (kLGRefreshViewLoadingView)
+        kLGRefreshViewLoadingView.alpha = 0.f;
+}
+
++ (void)setTintColor:(UIColor *)tintColor
+{
+    kLGRefreshViewTintColor = tintColor;
 }
 
 #pragma mark -
@@ -228,28 +274,38 @@ static CGFloat const kCircleInThicknessRatio  = 0.25;
 {
     if (self.superview)
     {
-        CGRect selfFrame = CGRectMake(0.f, -kRefreshViewHeight, _scrollView.frame.size.width, kRefreshViewHeight);
+        CGRect selfFrame = CGRectMake(0.f, -kLGRefreshViewHeight+_offsetY, _scrollView.frame.size.width, kLGRefreshViewHeight);
         if ([UIScreen mainScreen].scale == 1.f)
             selfFrame = CGRectIntegral(selfFrame);
         self.frame = selfFrame;
-        
+
         if (_backgroundView)
-            _backgroundView.frame = CGRectMake(0.f, selfFrame.size.height-kLGRefreshViewMainScreenSideMax, selfFrame.size.width, kLGRefreshViewMainScreenSideMax);
-        
-        CGRect circleFrame = CGRectMake((selfFrame.size.width-kCircleOutSize)/2,
-                                        (selfFrame.size.height-kCircleOutSize)/2,
-                                        kCircleOutSize,
-                                        kCircleOutSize);
-        if ([UIScreen mainScreen].scale == 1.f) circleFrame = CGRectIntegral(circleFrame);
+            _backgroundView.frame = CGRectMake(0.f, self.frame.size.height-kLGRefreshViewMainScreenSideMax, self.frame.size.width, kLGRefreshViewMainScreenSideMax);
+
+        CGRect circleFrame = CGRectMake((self.frame.size.width-kLGRefreshViewCircleOutSize)/2,
+                                        (self.frame.size.height-kLGRefreshViewCircleOutSize)/2,
+                                        kLGRefreshViewCircleOutSize,
+                                        kLGRefreshViewCircleOutSize);
+        if ([UIScreen mainScreen].scale == 1.f)
+            circleFrame = CGRectIntegral(circleFrame);
         _circleViewOut.frame = circleFrame;
-        
-        circleFrame = CGRectMake((selfFrame.size.width-kCircleInSize)/2,
-                                 (selfFrame.size.height-kCircleInSize)/2,
-                                 kCircleInSize,
-                                 kCircleInSize);
-        if ([UIScreen mainScreen].scale == 1.f) circleFrame = CGRectIntegral(circleFrame);
+
+        circleFrame = CGRectMake((self.frame.size.width-kLGRefreshViewCircleInSize)/2,
+                                 (self.frame.size.height-kLGRefreshViewCircleInSize)/2,
+                                 kLGRefreshViewCircleInSize,
+                                 kLGRefreshViewCircleInSize);
+        if ([UIScreen mainScreen].scale == 1.f)
+            circleFrame = CGRectIntegral(circleFrame);
         _circleViewIn.frame = circleFrame;
+
+        if (_loadingView)
+            _loadingView.center = CGPointMake(self.frame.size.width/2.f, self.frame.size.height/2.f);
     }
+}
+
+- (CGSize)sizeThatFits:(CGSize)size
+{
+    return CGSizeMake(size.width, kLGRefreshViewHeight);
 }
 
 - (void)restoreDefaultState
@@ -258,15 +314,18 @@ static CGFloat const kCircleInThicknessRatio  = 0.25;
     _circleViewOut.transform = CGAffineTransformIdentity;
     _circleViewOut.alpha = 0.f;
     [_circleViewOut setProgress:0.f animated:NO];
-    
+
     [_circleViewIn.layer removeAllAnimations];
     _circleViewIn.transform = CGAffineTransformIdentity;
     _circleViewIn.transform = CGAffineTransformScale(_circleViewIn.transform, -1, 1);
     _circleViewIn.alpha = 0.f;
     [_circleViewIn setProgress:0.f animated:NO];
-    
+
+    [_loadingView.layer removeAllAnimations];
+    _loadingView.alpha = 0.f;
+
     _transformed = NO;
-    
+
     [self layoutInvalidate];
 }
 
@@ -275,24 +334,25 @@ static CGFloat const kCircleInThicknessRatio  = 0.25;
     if (!self.isTriggered && !self.isRefreshing)
     {
         _triggered = YES;
-        
+
         _scrollView.scrollEnabled = YES;
         _scrollView.userInteractionEnabled = YES;
-        
+
         [self restoreDefaultState];
-        
-        [_circleViewOut setProgress:kCircleOutMaxProgress animated:NO];
-        [_circleViewIn setProgress:kCircleInMaxProgress animated:NO];
-        
-        [self runSpinAnimation];
-        
+
+        [_circleViewOut setProgress:kLGRefreshViewCircleOutMaxProgress animated:NO];
+        [_circleViewIn setProgress:kLGRefreshViewCircleInMaxProgress animated:NO];
+
+        if (!_loadingView)
+            [self runSpinAnimation];
+
         if (animated)
         {
             [LGRefreshView animateStandardWithAnimations:^(void)
              {
                  [self triggerAnimations];
              }
-                                         completion:^(BOOL finished)
+                                              completion:^(BOOL finished)
              {
                  [self triggerCompletion];
              }];
@@ -307,12 +367,29 @@ static CGFloat const kCircleInThicknessRatio  = 0.25;
 
 - (void)triggerAnimations
 {
-    _circleViewOut.alpha = 1.f;
-    _circleViewIn.alpha = 1.f;
-    
-    _circleViewOut.center = CGPointMake(self.frame.size.width/2, self.frame.size.height/2);
-    _circleViewIn.center = CGPointMake(self.frame.size.width/2, self.frame.size.height/2);
-    
+    if (_loadingView)
+    {
+        if (![_loadingView.superview isEqual:self])
+        {
+            [_loadingView removeFromSuperview];
+            [self addSubview:_loadingView];
+        }
+
+        _loadingView.alpha = 1.f;
+        _circleViewOut.alpha = 0.f;
+        _circleViewIn.alpha = 0.f;
+
+        _loadingView.center = CGPointMake(self.frame.size.width/2.f, self.frame.size.height/2.f);
+    }
+    else
+    {
+        _circleViewOut.alpha = 1.f;
+        _circleViewIn.alpha = 1.f;
+    }
+
+    _circleViewOut.center = CGPointMake(self.frame.size.width/2.f, self.frame.size.height/2.f);
+    _circleViewIn.center = CGPointMake(self.frame.size.width/2.f, self.frame.size.height/2.f);
+
     _ignoreInset = YES;
     _ignoreOffset = YES;
     [_scrollView setContentInset:UIEdgeInsetsMake(self.frame.size.height+_originalContentInset.top, _originalContentInset.left, _originalContentInset.bottom, _originalContentInset.right)];
@@ -332,9 +409,9 @@ static CGFloat const kCircleInThicknessRatio  = 0.25;
     if (!self.isObserversAdded && _scrollView)
     {
         _observersAdded = YES;
-        
+
         _originalContentInset = _scrollView.contentInset;
-        
+
         [_scrollView addObserver:self forKeyPath:@"contentInset" options:NSKeyValueObservingOptionNew|NSKeyValueObservingOptionPrior context:nil];
         [_scrollView addObserver:self forKeyPath:@"contentOffset" options:NSKeyValueObservingOptionNew context:nil];
         [_scrollView addObserver:self forKeyPath:@"frame" options:NSKeyValueObservingOptionNew context:nil];
@@ -346,7 +423,7 @@ static CGFloat const kCircleInThicknessRatio  = 0.25;
     if (self.isObserversAdded && _scrollView)
     {
         _observersAdded = NO;
-        
+
         [_scrollView removeObserver:self forKeyPath:@"contentInset"];
         [_scrollView removeObserver:self forKeyPath:@"contentOffset"];
         [_scrollView removeObserver:self forKeyPath:@"frame"];
@@ -360,27 +437,27 @@ static CGFloat const kCircleInThicknessRatio  = 0.25;
         if (self.frame.size.width != _scrollView.frame.size.width)
         {
             [self layoutInvalidate];
-            
+
             if (self.isRefreshing)
             {
                 [self removeFromSuperview];
-                
+
                 [self restoreDefaultState];
-                
+
                 UIEdgeInsets contentInset = _scrollView.contentInset;
                 contentInset.top -= self.frame.size.height;
                 _scrollView.contentInset = contentInset;
-                
+
                 dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.1 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^(void)
                                {
                                    if (!self.superview)
                                    {
                                        _refreshing = NO;
                                        _triggered = NO;
-                                       
+
                                        [_scrollView insertSubview:self atIndex:0];
                                        [self layoutInvalidate];
-                                       
+
                                        _scrollView.scrollEnabled = YES;
                                        _scrollView.userInteractionEnabled = YES;
                                    }
@@ -391,68 +468,77 @@ static CGFloat const kCircleInThicknessRatio  = 0.25;
     else if ([keyPath isEqualToString:@"contentInset"])
     {
         if (self.isIgnoreInset) return;
-        
+
         UIEdgeInsets newInset = [[change valueForKey:NSKeyValueChangeNewKey] UIEdgeInsetsValue];
-        
+
         _originalContentInset = newInset;
     }
     else if ([keyPath isEqualToString:@"contentOffset"])
     {
         if (self.isIgnoreOffset) return;
-        
+
         BOOL isTrackingAndDragging = (_scrollView.isTracking && _scrollView.isDragging);
-        
+
         CGPoint newOffset = [[change valueForKey:NSKeyValueChangeNewKey] CGPointValue];
-        
+
         CGFloat offsetY = newOffset.y + _originalContentInset.top;
-        
+
         // Set position of refreshView subviews
         if (offsetY < 0.f)
         {
             CGFloat tempOffsetY = offsetY+self.frame.size.height/2;
             CGFloat progress = (tempOffsetY >= 0.f ? 0.f : -tempOffsetY/self.frame.size.height) * 2;
-            
+
             // -----
-            
-            _circleViewOut.alpha = progress * 2;
-            _circleViewIn.alpha = progress * 2;
-            
+
+            if (!self.isRefreshing)
+            {
+                _circleViewOut.alpha = progress * 2;
+                _circleViewIn.alpha = progress * 2;
+            }
+
             // -----
-            
+
             BOOL isCanTransform = YES;
-            
+
             if (!kLGRefreshViewDeviceIsOld)
             {
                 CGFloat scale = progress + 0.5;
-                
-                if (!self.isTransformed && (scale <= 1.f || !CGSizeEqualToSize(_circleViewOut.frame.size, CGSizeMake(kCircleOutSize, kCircleOutSize))))
+
+                if (!self.isTransformed && (scale <= 1.f || !CGSizeEqualToSize(_circleViewOut.frame.size, CGSizeMake(kLGRefreshViewCircleOutSize, kLGRefreshViewCircleOutSize))))
                 {
                     isCanTransform = NO;
-                    
+
                     if (scale > 1.f) scale = 1.f;
-                    
-                    CGFloat circleOutSize = kCircleOutSize * scale;
-                    
+
+                    CGFloat circleOutSize = kLGRefreshViewCircleOutSize * scale;
+
                     _circleViewOut.frame = CGRectMake((self.frame.size.width-circleOutSize)/2, self.frame.size.height-circleOutSize/2+offsetY/2, circleOutSize, circleOutSize);
-                    
-                    CGFloat circleInSize = kCircleInSize * scale;
-                    
+
+                    CGFloat circleInSize = kLGRefreshViewCircleInSize * scale;
+
                     _circleViewIn.frame = CGRectMake((self.frame.size.width-circleInSize)/2, self.frame.size.height-circleInSize/2+offsetY/2, circleInSize, circleInSize);
                 }
                 else
                 {
                     _circleViewOut.center = CGPointMake(self.frame.size.width/2, self.frame.size.height+offsetY/2);
                     _circleViewIn.center = CGPointMake(self.frame.size.width/2, self.frame.size.height+offsetY/2);
+
+                    if (_loadingView)
+                        _loadingView.center = CGPointMake(self.frame.size.width/2, self.frame.size.height+offsetY/2);
                 }
             }
             else
             {
                 _circleViewOut.center = CGPointMake(self.frame.size.width/2, self.frame.size.height+offsetY/2);
                 _circleViewIn.center = CGPointMake(self.frame.size.width/2, self.frame.size.height+offsetY/2);
+
+                if (_loadingView)
+                    _loadingView.center = CGPointMake(self.frame.size.width/2, self.frame.size.height+offsetY/2);
             }
-            
+
             // -----
-            
+
             if (!self.isRefreshing && isTrackingAndDragging)
             {
                 if (isCanTransform)
@@ -462,36 +548,36 @@ static CGFloat const kCircleInThicknessRatio  = 0.25;
                         CGFloat angle = progress-1.f;
                         angle = kLGRefreshViewDegreesToRadians(angle);
                         angle *= 150;
-                        
+
                         _circleViewOut.transform = CGAffineTransformIdentity;
                         _circleViewOut.transform = CGAffineTransformRotate(_circleViewOut.transform, angle);
-                        
+
                         _circleViewIn.transform = CGAffineTransformIdentity;
                         _circleViewIn.transform = CGAffineTransformScale(_circleViewIn.transform, -1, 1);
                         _circleViewIn.transform = CGAffineTransformRotate(_circleViewIn.transform, angle);
-                        
+
                         _transformed = YES;
                     }
                     else if (self.isTransformed)
                     {
                         _circleViewOut.transform = CGAffineTransformIdentity;
-                        
+
                         _circleViewIn.transform = CGAffineTransformIdentity;
                         _circleViewIn.transform = CGAffineTransformScale(_circleViewIn.transform, -1, 1);
-                        
+
                         _transformed = NO;
                     }
                 }
-                
+
                 // -----
-                
+
                 if (progress > 1.f) progress = 1.f;
-                
-                [_circleViewOut setProgress:progress*kCircleOutMaxProgress animated:NO];
-                [_circleViewIn setProgress:progress*kCircleInMaxProgress animated:NO];
+
+                [_circleViewOut setProgress:progress*kLGRefreshViewCircleOutMaxProgress animated:NO];
+                [_circleViewIn setProgress:progress*kLGRefreshViewCircleInMaxProgress animated:NO];
             }
         }
-        
+
         if (self.isRefreshing)
         {
             // Set the inset depending on the situation
@@ -507,7 +593,7 @@ static CGFloat const kCircleInThicknessRatio  = 0.25;
         else
         {
             // Start refreshing
-            if (!isTrackingAndDragging && _circleViewOut.progress >= kCircleOutMaxProgress && offsetY <= -self.frame.size.height)
+            if (!isTrackingAndDragging && _circleViewOut.progress >= kLGRefreshViewCircleOutMaxProgress && offsetY <= -self.frame.size.height)
                 [self beginRefreshing];
         }
     }
@@ -516,6 +602,42 @@ static CGFloat const kCircleInThicknessRatio  = 0.25;
 
 #pragma mark - Animations
 
+- (void)showLoadingView:(BOOL)animated
+{
+    if (![_loadingView.superview isEqual:self])
+    {
+        [_loadingView removeFromSuperview];
+        [self addSubview:_loadingView];
+    }
+
+    if (animated)
+    {
+        NSTimeInterval duration = 0.2;
+
+        CABasicAnimation *animation;
+        animation = [CABasicAnimation animationWithKeyPath:@"opacity"];
+        animation.duration = duration;
+        animation.fromValue = [NSNumber numberWithFloat:1.f];
+        animation.removedOnCompletion = NO;
+
+        _circleViewIn.layer.opacity = 0.f;
+        [_circleViewIn.layer addAnimation:animation forKey:@"opacityAnimation"];
+        _circleViewOut.layer.opacity = 0.f;
+        [_circleViewOut.layer addAnimation:animation forKey:@"opacityAnimation"];
+
+        [UIView animateWithDuration:duration
+                         animations:^{
+                             _loadingView.alpha = 1.f;
+                         }];
+    }
+    else
+    {
+        _circleViewIn.alpha = 0.f;
+        _circleViewOut.alpha = 0.f;
+        _loadingView.alpha = 1.f;
+    }
+}
+
 - (void)runSpinAnimation
 {
     if (![_circleViewOut.layer.animationKeys containsObject:@"rotationAnimation"])
@@ -523,21 +645,21 @@ static CGFloat const kCircleInThicknessRatio  = 0.25;
         CGFloat multiplier = 1000000.f;
         NSTimeInterval duration = 0.7 * multiplier;
         CGFloat rotations = 1.f * multiplier;
-        
+
         float value = (M_PI * 2.0 * rotations);
-        
+
         CABasicAnimation *rotationAnimation;
         rotationAnimation = [CABasicAnimation animationWithKeyPath:@"transform.rotation.z"];
         rotationAnimation.duration = duration;
         rotationAnimation.cumulative = YES;
         rotationAnimation.repeatCount = 1;
-        
+
         rotationAnimation.toValue = [NSNumber numberWithFloat:value];
-        
+
         [_circleViewOut.layer addAnimation:rotationAnimation forKey:@"rotationAnimation"];
-        
+
         rotationAnimation.toValue = [NSNumber numberWithFloat:-value];
-        
+
         [_circleViewIn.layer addAnimation:rotationAnimation forKey:@"rotationAnimation"];
     }
 }
@@ -547,22 +669,25 @@ static CGFloat const kCircleInThicknessRatio  = 0.25;
     if (!self.isRefreshing)
     {
         _refreshing = YES;
-        
+
         _scrollView.scrollEnabled = NO;
         _scrollView.userInteractionEnabled = NO;
-        
-        [self runSpinAnimation];
-        
+
+        if (_loadingView && !_loadingView.alpha)
+            [self showLoadingView:YES];
+        else
+            [self runSpinAnimation];
+
         dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.5 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^(void)
                        {
                            _beginUpdatingDate = [NSDate date];
-                           
+
                            // -----
-                           
+
                            [[NSNotificationCenter defaultCenter] postNotificationName:kLGRefreshViewBeginRefreshingNotification object:self userInfo:nil];
-                           
+
                            if (_refreshHandler) _refreshHandler(self);
-                           
+
                            if (_delegate && [_delegate respondsToSelector:@selector(refreshViewRefreshing:)])
                                [_delegate refreshViewRefreshing:self];
                        });
@@ -575,13 +700,13 @@ static CGFloat const kCircleInThicknessRatio  = 0.25;
     {
         NSDate *endUpdatingDate = [NSDate date];
         NSTimeInterval interval = [endUpdatingDate timeIntervalSinceDate:_beginUpdatingDate];
-        
+
         NSTimeInterval minimum = 1.5;
-        
+
         if (interval < minimum)
         {
             NSTimeInterval after = minimum-interval;
-            
+
             dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(after * NSEC_PER_SEC)), dispatch_get_main_queue(), ^(void)
                            {
                                [self endRefreshing2];
@@ -594,16 +719,16 @@ static CGFloat const kCircleInThicknessRatio  = 0.25;
 - (void)endRefreshing2
 {
     if (self.superview)
-        {
-            [LGRefreshView animateStandardWithAnimations:^(void)
-             {
-                 [self endRefreshing2Animation];
-             }
-                                         completion:^(BOOL finished)
-             {
-                 [self endRefreshing2Completion];
-             }];
-        }
+    {
+        [LGRefreshView animateStandardWithAnimations:^(void)
+         {
+             [self endRefreshing2Animation];
+         }
+                                          completion:^(BOOL finished)
+         {
+             [self endRefreshing2Completion];
+         }];
+    }
 }
 
 - (void)endRefreshing2Animation
@@ -612,7 +737,10 @@ static CGFloat const kCircleInThicknessRatio  = 0.25;
     {
         _circleViewOut.alpha = 0.f;
         _circleViewIn.alpha = 0.f;
-        
+
+        if (_loadingView && [_loadingView.superview isEqual:self])
+            _loadingView.alpha = 0.f;
+
         _ignoreInset = YES;
         [_scrollView setContentInset:_originalContentInset];
         _ignoreInset = NO;
@@ -624,15 +752,15 @@ static CGFloat const kCircleInThicknessRatio  = 0.25;
     if (self.superview)
     {
         [self restoreDefaultState];
-        
+
         _refreshing = NO;
         _triggered = NO;
-        
+
         _scrollView.scrollEnabled = YES;
         _scrollView.userInteractionEnabled = YES;
-        
+
         // -----
-        
+
         [[NSNotificationCenter defaultCenter] postNotificationName:kLGRefreshViewEndRefreshingNotification object:self userInfo:nil];
     }
 }
